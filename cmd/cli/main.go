@@ -112,44 +112,49 @@ func main() {
 		// Only scan .zsh, .sh files
 		ext := filepath.Ext(path)
 		if ext == ".zsh" || ext == ".sh" {
-			file, _ := os.Open(path)
-			defer file.Close()
+				file, _ := os.Open(path)
+				defer file.Close()
 
-			var (
-				scanner = bufio.NewScanner(file)
-				lineNum = 0
-				currentName string
-				lines []string
-			)
+				var (
+						scanner     = bufio.NewScanner(file)
+						currentName string
+				)
 
-			// Read whole file for preview logic
-			var fileContent []string
-			for scanner.Scan() {
-				fileContent = append(fileContent, scanner.Text())
-			}
-
-			for i, line := range fileContent {
-				lineNum = i + 1
-				if strings.Contains(line, "@name:") {
-					currentName = strings.TrimSpace(strings.Split(line, "@name:")[1])
-				} else if strings.Contains(line, "@description:") && currentName != "" {
-					desc := strings.TrimSpace(strings.Split(line, "@description:")[1])
-					
-					// Build a 20-line preview window starting from the @name tag
-					end := i + 20
-					if end > len(fileContent) { end = len(fileContent) }
-					preview := strings.Join(fileContent[i-1:end], "\n")
-
-					items = append(items, item{
-						name:        currentName,
-						description: desc,
-						path:        path,
-						line:        i, // The line number for nvim
-						preview:     preview,
-					})
-					currentName = ""
+				var fileContent []string
+				for scanner.Scan() {
+						fileContent = append(fileContent, scanner.Text())
 				}
-			}
+
+				for i, line := range fileContent {
+						if strings.Contains(line, "@name:") {
+								parts := strings.Split(line, "@name:")
+								if len(parts) > 1 {
+										currentName = strings.TrimSpace(parts[1])
+								}
+						} else if strings.Contains(line, "@description:") && currentName != "" {
+								parts := strings.Split(line, "@description:")
+								if len(parts) > 1 {
+										desc := strings.TrimSpace(parts[1])
+										
+										// Safety check for preview slicing
+										start := i
+										if start < 0 { start = 0 }
+										end := i + 20
+										if end > len(fileContent) { end = len(fileContent) }
+										
+										preview := strings.Join(fileContent[start:end], "\n")
+
+										items = append(items, item{
+												name:        currentName,
+												description: desc,
+												path:        path,
+												line:        i + 1, // Many editors (and nvim +line) prefer 1-based
+												preview:     preview,
+										})
+										currentName = ""
+								}
+						}
+				}
 		}
 		return nil
 	})
