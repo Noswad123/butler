@@ -7,6 +7,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/Noswad123/butler/internal/parser"
 	"github.com/Noswad123/butler/internal/styles"
@@ -16,6 +18,7 @@ import (
 func main() {
 	home, _ := os.UserHomeDir()
 	dotfilesPath := filepath.Join(home, ".dotfiles")
+	lipgloss.SetColorProfile(termenv.TrueColor)
 
 	items, err := parser.ScanDotfiles(dotfilesPath)
 	if err != nil {
