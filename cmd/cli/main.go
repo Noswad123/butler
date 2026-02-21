@@ -1,183 +1,49 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+
+	"github.com/Noswad123/butler/internal/parser"
+	"github.com/Noswad123/butler/internal/styles"
+	"github.com/Noswad123/butler/internal/ui"
 )
-
-// Styling
-var (
-	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("170")).Padding(0, 1)
-	docStyle    = lipgloss.NewStyle().Margin(1, 2)
-	listStyle   = lipgloss.NewStyle().Width(40).Border(lipgloss.NormalBorder(), false, true, false, false)
-	prevStyle   = lipgloss.NewStyle().Padding(0, 2)
-)
-
-type item struct {
-	name, description, path, preview string
-	line                             int
-}
-
-func (i item) Title() string       { return i.name }
-func (i item) Description() string { return i.description }
-func (i item) FilterValue() string { return i.name + " " + i.description }
-
-type model struct {
-	list     list.Model
-	viewport viewport.Model
-	choice   string
-	quitting bool
-	ready    bool
-}
-
-func (m model) Init() tea.Cmd { return nil }
-
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c", "q", "esc":
-			m.quitting = true
-			return m, tea.Quit
-		case "enter":
-			i, ok := m.list.SelectedItem().(item)
-			if ok {
-				m.choice = fmt.Sprintf("%s:%d", i.path, i.line)
-			}
-			return m, tea.Quit
-		}
-
-	case tea.WindowSizeMsg:
-		h, v := docStyle.GetFrameSize()
-		listWidth := 40
-		m.list.SetSize(listWidth, msg.Height-v)
-		
-		if !m.ready {
-			m.viewport = viewport.New(msg.Width-listWidth-h-4, msg.Height-v)
-			m.ready = true
-		} else {
-			m.viewport.Width = msg.Width - listWidth - h - 4
-			m.viewport.Height = msg.Height - v
-		}
-	}
-
-	// Update List
-	var listCmd tea.Cmd
-	m.list, listCmd = m.list.Update(msg)
-	cmds = append(cmds, listCmd)
-
-	// Update Preview Content based on selection
-	if i, ok := m.list.SelectedItem().(item); ok {
-		m.viewport.SetContent(i.preview)
-	}
-
-	return m, tea.Batch(cmds...)
-}
-
-func (m model) View() string {
-	if m.quitting { return "" }
-	if !m.ready { return "\n  Initializing Butler..." }
-
-	return docStyle.Render(
-		lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			listStyle.Render(m.list.View()),
-			prevStyle.Render(m.viewport.View()),
-		),
-	)
-}
 
 func main() {
 	home, _ := os.UserHomeDir()
-	// Explicitly check the path. If your dotfiles are in a different spot, 
-	// use an env var or a hardcoded path.
-	dotfiles := filepath.Join(home, ".dotfiles")
-	
-	var items []list.Item
+	dotfilesPath := filepath.Join(home, ".dotfiles")
 
-	// Walk through the directories you listed earlier
-	err := filepath.Walk(dotfiles, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() { return nil }
-		
-		// Only scan .zsh, .sh files
-		ext := filepath.Ext(path)
-		if ext == ".zsh" || ext == ".sh" {
-				file, _ := os.Open(path)
-				defer file.Close()
-
-				var (
-						scanner     = bufio.NewScanner(file)
-						currentName string
-				)
-
-				var fileContent []string
-				for scanner.Scan() {
-						fileContent = append(fileContent, scanner.Text())
-				}
-
-				for i, line := range fileContent {
-						if strings.Contains(line, "@name:") {
-								parts := strings.Split(line, "@name:")
-								if len(parts) > 1 {
-										currentName = strings.TrimSpace(parts[1])
-								}
-						} else if strings.Contains(line, "@description:") && currentName != "" {
-								parts := strings.Split(line, "@description:")
-								if len(parts) > 1 {
-										desc := strings.TrimSpace(parts[1])
-										
-										// Safety check for preview slicing
-										start := i
-										if start < 0 { start = 0 }
-										end := i + 20
-										if end > len(fileContent) { end = len(fileContent) }
-										
-										preview := strings.Join(fileContent[start:end], "\n")
-
-										items = append(items, item{
-												name:        currentName,
-												description: desc,
-												path:        path,
-												line:        i + 1, // Many editors (and nvim +line) prefer 1-based
-												preview:     preview,
-										})
-										currentName = ""
-								}
-						}
-				}
-		}
-		return nil
-	})
-
+	items, err := parser.ScanDotfiles(dotfilesPath)
 	if err != nil {
-		fmt.Printf("Error walking path: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error scanning dotfiles: %v\n", err)
 		os.Exit(1)
 	}
 
-	m := model{list: list.New(items, list.NewDefaultDelegate(), 0, 0)}
-	m.list.Title = "BUTLER"
-	m.list.SetShowStatusBar(false)
+	if len(items) == 0 {
+		fmt.Fprintf(os.Stderr, "Butler found 0 tags. Check your @name format in %s\n", dotfilesPath)
+		os.Exit(1)
+	}
 
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithOutput(os.Stderr))
+	m := ui.Model{
+		List:   list.New(items, list.NewDefaultDelegate(), 0, 0),
+		Styles: styles.DefaultStyles(),
+	}
+	m.List.Title = "Your custom functions..."
+	m.List.SetShowStatusBar(false)
+
+	p := tea.NewProgram(&m, tea.WithAltScreen(), tea.WithOutput(os.Stderr))
+	
 	finalModel, err := p.Run()
-	
 	if err != nil {
-		fmt.Println("Error:", err)
+		fmt.Fprintf(os.Stderr, "Error running Butler: %v\n", err)
 		os.Exit(1)
 	}
 
-	choice := finalModel.(model).choice
-	if choice != "" {
-		fmt.Print(choice) // Output to stdout for the shell wrapper
+	if choice := finalModel.(*ui.Model).Choice; choice != "" {
+		fmt.Print(choice)
 	}
 }
