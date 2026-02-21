@@ -68,7 +68,7 @@ func ScanDotfiles(root string) ([]list.Item, error) {
 					Summary: desc,
 					Path:        path,
 					Line:        nameLine + 1,
-					Preview:     strings.Join(fileContent[nameLine:endIdx+1], "\n"),
+					Preview:     Highlight(strings.Join(fileContent[nameLine:endIdx+1], "\n"), path),
 				})
 				currentName = "" 
 			}
@@ -78,3 +78,4 @@ func ScanDotfiles(root string) ([]list.Item, error) {
 
 	return items, err
 }
+
